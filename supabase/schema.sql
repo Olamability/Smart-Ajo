@@ -859,6 +859,15 @@ CREATE POLICY groups_update_creator ON groups
     is_current_user_admin()
   );
 
+-- Group creators can delete their groups if no members have joined yet
+-- Platform admins can delete any group
+CREATE POLICY groups_delete_creator_empty ON groups
+  FOR DELETE
+  USING (
+    (auth.uid() = created_by AND current_members = 0) OR
+    is_current_user_admin()
+  );
+
 -- Service role can do anything
 CREATE POLICY groups_service_role_all ON groups
   FOR ALL
