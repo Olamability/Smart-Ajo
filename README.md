@@ -56,6 +56,7 @@ A modern web application for managing rotating savings groups (Ajo/Esusu) with c
 ## 📚 Documentation
 
 - **[Environment Setup Guide](./ENVIRONMENT_SETUP.md)** - Detailed environment configuration and troubleshooting
+- **[Vercel Deployment Guide](./VERCEL_DEPLOYMENT.md)** - **Step-by-step guide for deploying to Vercel**
 - **[Architecture Guide](./ARCHITECTURE.md)** - System architecture and design decisions
 - **[Paystack Configuration](./PAYSTACK_CONFIGURATION.md)** - Payment integration setup
 - **[Supabase Setup](./SUPABASE_SETUP.md)** - Database and backend configuration
@@ -96,12 +97,17 @@ smart-ajo/
 
 This error occurs when the Paystack public key is not properly set in your environment variables.
 
-**Solution:**
+**For Local Development:**
 1. Get your public key from [Paystack Dashboard](https://dashboard.paystack.com/)
 2. Update `VITE_PAYSTACK_PUBLIC_KEY` in `.env.development`
 3. Restart the development server
 
-See [ENVIRONMENT_SETUP.md](./ENVIRONMENT_SETUP.md#issue-1-paystack-public-key-not-configured) for detailed instructions.
+**For Vercel Deployment:**
+1. Go to Vercel Dashboard → Your Project → Settings → Environment Variables
+2. Add `VITE_PAYSTACK_PUBLIC_KEY` with your Paystack public key
+3. Redeploy your application
+
+**See [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) for complete Vercel setup instructions.**
 
 ### Page Refresh Returns 404
 
@@ -122,6 +128,22 @@ npm run build
 
 The built files will be in the `dist/` directory.
 
+### Deploy to Vercel
+
+**Quick Setup:**
+1. Connect your repository to Vercel
+2. Framework preset: Vite (auto-detected)
+3. Build command: `npm run build` (auto-detected)
+4. Output directory: `dist` (auto-detected)
+5. **Add environment variables in Vercel dashboard** (CRITICAL STEP)
+6. Deploy!
+
+**Important:** Environment variables must be configured in Vercel dashboard for the application to work.
+
+**See [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) for complete step-by-step instructions.**
+
+The `vercel.json` file ensures SPA routing works correctly.
+
 ### Deploy to Netlify
 
 1. Connect your repository to Netlify
@@ -131,17 +153,6 @@ The built files will be in the `dist/` directory.
 5. Deploy!
 
 The `public/_redirects` file ensures SPA routing works correctly.
-
-### Deploy to Vercel
-
-1. Connect your repository to Vercel
-2. Framework preset: Vite
-3. Build command: `npm run build`
-4. Output directory: `dist`
-5. Add environment variables in Vercel dashboard
-6. Deploy!
-
-The `vercel.json` file ensures SPA routing works correctly.
 
 ### Environment Variables for Production
 

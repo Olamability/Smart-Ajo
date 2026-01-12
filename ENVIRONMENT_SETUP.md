@@ -11,7 +11,9 @@ This guide helps you properly configure your environment variables to avoid comm
 Payment error: Error: Paystack public key not configured. Please set VITE_PAYSTACK_PUBLIC_KEY in your .env file.
 ```
 
-**Solution:**
+**Solution depends on your environment:**
+
+#### For Local Development:
 
 1. **Get your Paystack API keys:**
    - Visit [Paystack Dashboard](https://dashboard.paystack.com/)
@@ -38,6 +40,29 @@ Payment error: Error: Paystack public key not configured. Please set VITE_PAYSTA
    # Stop the current server (Ctrl+C)
    npm run dev
    ```
+
+#### For Vercel Deployment:
+
+If you see this error on Vercel, you need to configure environment variables in the Vercel dashboard:
+
+1. **Go to Vercel Dashboard:**
+   - Visit https://vercel.com/dashboard
+   - Select your project
+   - Go to **Settings** → **Environment Variables**
+
+2. **Add the Paystack public key:**
+   - Click **Add New**
+   - Name: `VITE_PAYSTACK_PUBLIC_KEY`
+   - Value: `pk_test_your_actual_key_here` (or `pk_live_...` for production)
+   - Select environments: Production, Preview, Development
+   - Click **Save**
+
+3. **Redeploy your application:**
+   - Go to **Deployments** tab
+   - Click **...** on latest deployment
+   - Select **Redeploy**
+
+**For complete Vercel deployment instructions, see [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md)**
 
 ### Issue 2: Page refresh returns 404 error
 
@@ -199,8 +224,25 @@ VITE_PAYSTACK_PUBLIC_KEY=pk_live_your_live_public_key
 - Only `.env.example` should be in the repository
 - Use your hosting platform's environment variable settings for production
 
+### Platform-Specific Configuration
+
+#### Vercel
+- Environment variables must be set in the Vercel dashboard
+- Go to **Settings** → **Environment Variables**
+- Variables are applied at build time
+- **See [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) for detailed instructions**
+
+#### Netlify
+- Set environment variables in **Site Settings** → **Environment Variables**
+- Variables are available during build and runtime
+
+#### Other Platforms
+- Consult your hosting provider's documentation for setting environment variables
+- Ensure all `VITE_*` variables are set at build time
+
 ## Additional Resources
 
+- [Vercel Deployment Guide](./VERCEL_DEPLOYMENT.md) - **Step-by-step guide for Vercel**
 - [Paystack Setup Guide](./PAYSTACK_CONFIGURATION.md)
 - [Deployment Guide](./DEPLOYMENT_GUIDE.md)
 - [Vite Environment Variables](https://vitejs.dev/guide/env-and-mode.html)
