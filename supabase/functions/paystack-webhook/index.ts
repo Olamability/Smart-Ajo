@@ -24,7 +24,6 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { HmacSha512 } from "https://deno.land/x/hmac@v2.0.1/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -79,12 +78,31 @@ interface PaystackEvent {
 }
 
 /**
- * Verify Paystack webhook signature
+ * Verify Paystack webhook signature using Web Crypto API
  */
-function verifySignature(payload: string, signature: string, secret: string): boolean {
+async function verifySignature(payload: string, signature: string, secret: string): Promise<boolean> {
   try {
-    const hmac = new HmacSha512(secret);
-    const hash = hmac.update(payload).toString();
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const messageData = encoder.encode(payload);
+    
+    // Import the key for HMAC-SHA512
+    const key = await crypto.subtle.importKey(
+      'raw',
+      keyData,
+      { name: 'HMAC', hash: 'SHA-512' },
+      false,
+      ['sign']
+    );
+    
+    // Generate the HMAC signature
+    const signatureBuffer = await crypto.subtle.sign('HMAC', key, messageData);
+    
+    // Convert to hex string
+    const hash = Array.from(new Uint8Array(signatureBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+    
     return hash === signature;
   } catch (error) {
     console.error('Signature verification error:', error);
@@ -356,7 +374,7 @@ serve(async (req) => {
       );
     }
 
-    const isValid = verifySignature(rawBody, signature, paystackSecret);
+    const isValid = await verifySignature(rawBody, signature, paystackSecret);
     if (!isValid) {
       console.error('Invalid signature');
       return new Response(
