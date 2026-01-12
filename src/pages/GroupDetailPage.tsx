@@ -15,6 +15,7 @@ import {
   initializeGroupJoinPayment,
   verifyPayment,
   processApprovedJoinPayment,
+  pollPaymentStatus,
 } from '@/api/payments';
 import type { Group, GroupMember } from '@/types';
 import { paystackService, PaystackResponse } from '@/lib/paystack';
@@ -247,12 +248,18 @@ export default function GroupDetailPage() {
           try {
             // Payment successful, verify on backend
             if (response.status === 'success') {
-              toast.info('Payment received! Verifying...');
+              toast.info('Payment received! Verifying with backend...', {
+                duration: 5000,
+              });
               
-              // Verify payment with backend
+              // Verify payment with backend (with retry logic)
               const verifyResult = await verifyPayment(response.reference);
               
+              console.log('Verification result:', verifyResult);
+              
               if (verifyResult.verified) {
+                toast.success('Payment verified! Processing your membership...');
+                
                 // Process approved join payment
                 const processResult = await processApprovedJoinPayment(
                   response.reference,
@@ -267,17 +274,73 @@ export default function GroupDetailPage() {
                   await loadMembers();
                   await loadUserJoinRequestStatus();
                 } else {
-                  toast.error(processResult.error || 'Failed to process payment');
+                  console.error('Payment processing failed:', processResult.error);
+                  toast.error(
+                    processResult.error || 
+                    'Failed to process payment. Please contact support with reference: ' + response.reference
+                  );
                 }
               } else {
-                toast.error('Payment verification failed. Please contact support.');
+                console.error('Payment verification failed:', verifyResult);
+                
+                // Try fallback: poll payment status from database
+                // This handles cases where Edge Function fails but webhook might have processed it
+                toast.info('Verification failed. Checking payment status...', {
+                  duration: 5000,
+                });
+                
+                const pollResult = await pollPaymentStatus(response.reference);
+                
+                if (pollResult.verified) {
+                  console.log('Payment verified via polling fallback');
+                  toast.success('Payment verified! Processing your membership...');
+                  
+                  // Process approved join payment
+                  const processResult = await processApprovedJoinPayment(
+                    response.reference,
+                    id
+                  );
+                  
+                  if (processResult.success) {
+                    toast.success(`Payment verified! You are now a member at position ${processResult.position}.`);
+                    setShowApprovedPaymentDialog(false);
+                    // Reload data
+                    await loadGroupDetails();
+                    await loadMembers();
+                    await loadUserJoinRequestStatus();
+                  } else {
+                    console.error('Payment processing failed:', processResult.error);
+                    toast.error(
+                      processResult.error || 
+                      'Failed to process payment. Please contact support with reference: ' + response.reference
+                    );
+                  }
+                } else {
+                  // Both verification and polling failed
+                  // Provide detailed error message based on verification result
+                  let errorMessage = 'Payment verification failed.';
+                  if (verifyResult.payment_status === 'verification_failed') {
+                    errorMessage = 'Unable to verify payment with Paystack. Please contact support with reference: ' + response.reference;
+                  } else if (verifyResult.payment_status === 'failed') {
+                    errorMessage = 'Payment was declined by your bank. Please try again.';
+                  } else if (verifyResult.error) {
+                    errorMessage = `Verification error: ${verifyResult.error}. Reference: ${response.reference}`;
+                  } else {
+                    errorMessage = `Payment status: ${verifyResult.payment_status}. Please contact support with reference: ${response.reference}`;
+                  }
+                  
+                  toast.error(errorMessage, { duration: 10000 });
+                }
               }
             } else {
               toast.error('Payment was not successful');
             }
           } catch (error) {
             console.error('Error in payment callback:', error);
-            toast.error('An error occurred while processing your payment. Please contact support with reference: ' + response.reference);
+            toast.error(
+              'An error occurred while processing your payment. Please contact support with reference: ' + response.reference,
+              { duration: 10000 }
+            );
           } finally {
             setIsProcessingPayment(false);
           }

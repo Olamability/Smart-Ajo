@@ -8,7 +8,8 @@ import { createGroup, deleteGroup } from '@/api';
 import { 
   initializeGroupCreationPayment, 
   verifyPayment, 
-  processGroupCreationPayment 
+  processGroupCreationPayment,
+  pollPaymentStatus,
 } from '@/api/payments';
 import { DEFAULT_SERVICE_FEE_PERCENTAGE } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
@@ -233,26 +234,59 @@ export default function CreateGroupPage() {
               } else {
                 console.error('Payment verification failed:', verifyResult);
                 
-                // Provide detailed error message based on verification result
-                let errorMessage = 'Payment verification failed.';
-                if (verifyResult.payment_status === 'verification_failed') {
-                  errorMessage = 'Unable to verify payment with Paystack. Please contact support with reference: ' + response.reference;
-                } else if (verifyResult.payment_status === 'failed') {
-                  errorMessage = 'Payment was declined by your bank. Please try again.';
-                } else if (verifyResult.error) {
-                  errorMessage = `Verification error: ${verifyResult.error}. Reference: ${response.reference}`;
+                // Try fallback: poll payment status from database
+                // This handles cases where Edge Function fails but webhook might have processed it
+                toast.info('Verification failed. Checking payment status...', {
+                  duration: 5000,
+                });
+                
+                const pollResult = await pollPaymentStatus(response.reference);
+                
+                if (pollResult.verified) {
+                  console.log('Payment verified via polling fallback');
+                  toast.success('Payment verified! Processing your membership...');
+                  
+                  // Process payment and add creator as member with selected slot
+                  const processResult = await processGroupCreationPayment(
+                    response.reference,
+                    createdGroup.id,
+                    selectedSlot
+                  );
+                  
+                  if (processResult.success) {
+                    toast.success('Payment verified! You are now the group admin.');
+                    setShowPaymentDialog(false);
+                    navigate(`/groups/${createdGroup.id}`);
+                  } else {
+                    console.error('Payment processing failed:', processResult.error);
+                    toast.error(
+                      processResult.error || 'Failed to process payment. Please contact support with reference: ' + response.reference
+                    );
+                    setShowPaymentDialog(false);
+                    navigate('/groups');
+                  }
                 } else {
-                  errorMessage = `Payment status: ${verifyResult.payment_status}. Please contact support with reference: ${response.reference}`;
+                  // Both verification and polling failed
+                  // Provide detailed error message based on verification result
+                  let errorMessage = 'Payment verification failed.';
+                  if (verifyResult.payment_status === 'verification_failed') {
+                    errorMessage = 'Unable to verify payment with Paystack. Please contact support with reference: ' + response.reference;
+                  } else if (verifyResult.payment_status === 'failed') {
+                    errorMessage = 'Payment was declined by your bank. Please try again.';
+                  } else if (verifyResult.error) {
+                    errorMessage = `Verification error: ${verifyResult.error}. Reference: ${response.reference}`;
+                  } else {
+                    errorMessage = `Payment status: ${verifyResult.payment_status}. Please contact support with reference: ${response.reference}`;
+                  }
+                  
+                  toast.error(errorMessage, { duration: 10000 });
+                  
+                  // IMPORTANT: Don't delete group if verification failed but payment might have succeeded
+                  // The webhook might still process it, or support can verify manually
+                  setShowPaymentDialog(false);
+                  navigate('/groups');
                 }
-                
-                toast.error(errorMessage, { duration: 10000 });
-                
-                // IMPORTANT: Don't delete group if verification failed but payment might have succeeded
-                // The webhook might still process it, or support can verify manually
-                setShowPaymentDialog(false);
-                navigate('/groups');
               }
-            } else {
               toast.error('Payment was not successful');
               // Delete group since payment was not successful
               await handleGroupCleanup(createdGroup.id, 'Payment not successful');

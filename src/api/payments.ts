@@ -413,6 +413,74 @@ export const processApprovedJoinPayment = async (
 };
 
 /**
+ * Poll payment status from database
+ * Used as a fallback when Edge Function verification has issues
+ */
+export const pollPaymentStatus = async (
+  reference: string,
+  maxAttempts: number = 5,
+  intervalMs: number = 3000
+): Promise<{
+  success: boolean;
+  verified: boolean;
+  payment?: any;
+  error?: string;
+}> => {
+  console.log(`Starting payment status polling for reference: ${reference}`);
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    console.log(`Polling attempt ${attempt}/${maxAttempts}`);
+    
+    const result = await getPaymentStatus(reference);
+    
+    if (result.success && result.payment) {
+      console.log('Payment found:', result.payment);
+      
+      // Check if payment is verified and successful
+      if (result.payment.verified && result.payment.status === 'success') {
+        console.log('Payment verified and successful');
+        return {
+          success: true,
+          verified: true,
+          payment: result.payment,
+        };
+      }
+      
+      // Check if payment failed
+      if (result.payment.status === 'failed') {
+        console.log('Payment failed');
+        return {
+          success: false,
+          verified: false,
+          payment: result.payment,
+          error: 'Payment failed',
+        };
+      }
+      
+      // Payment still pending, continue polling if we have attempts left
+      if (attempt < maxAttempts) {
+        console.log(`Payment still pending, waiting ${intervalMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, intervalMs));
+        continue;
+      }
+    }
+    
+    // If not found or error, continue polling if we have attempts left
+    if (attempt < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+      continue;
+    }
+  }
+  
+  console.log('Payment status polling exhausted all attempts');
+  return {
+    success: false,
+    verified: false,
+    error: 'Payment status could not be determined',
+  };
+};
+
+/**
  * Get payment status from database
  * Used to check if a payment has been verified and processed
  */
