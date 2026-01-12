@@ -209,6 +209,15 @@ async function executeBusinessLogic(
       return await processContributionPayment(supabase, paystackData);
     case 'security_deposit':
       return await processSecurityDeposit(supabase, paystackData);
+    case 'group_creation':
+    case 'group_join':
+      // These payment types are handled by separate RPC functions
+      // (process_group_creation_payment and process_group_join_payment)
+      // after verification, so we just acknowledge the verification here
+      return {
+        success: true,
+        message: 'Payment verified successfully',
+      };
     default:
       return {
         success: false,
