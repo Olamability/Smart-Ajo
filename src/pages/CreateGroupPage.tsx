@@ -222,9 +222,9 @@ export default function CreateGroupPage() {
                   // Navigate to group detail page
                   navigate(`/groups/${createdGroup.id}`);
                 } else {
-                  console.error('Payment processing failed:', processResult.error);
+                  console.error('Payment processing failed after verification:', processResult.error);
                   toast.error(
-                    `Failed to complete membership setup: ${processResult.error}. Contact support with reference: ${response.reference}`,
+                    `Failed to complete membership setup: ${processResult.error}. Please contact support with reference: ${response.reference}`,
                     { duration: 10000 }
                   );
                   // CRITICAL FIX: Delete group since membership couldn't be established
@@ -262,9 +262,9 @@ export default function CreateGroupPage() {
                     setShowPaymentDialog(false);
                     navigate(`/groups/${createdGroup.id}`);
                   } else {
-                    console.error('Payment processing failed after polling success:', processResult.error);
+                    console.error('Payment processing failed after verification:', processResult.error);
                     toast.error(
-                      `Failed to complete membership setup: ${processResult.error}. Contact support with reference: ${response.reference}`,
+                      `Failed to complete membership setup: ${processResult.error}. Please contact support with reference: ${response.reference}`,
                       { duration: 10000 }
                     );
                     // Delete group since membership couldn't be established
