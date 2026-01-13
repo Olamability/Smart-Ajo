@@ -161,6 +161,10 @@ export const verifyPayment = async (
   // using expired tokens. getUser() makes a network call to verify the JWT is still valid.
   const supabase = createClient();
   
+  console.log('=== PAYMENT VERIFICATION FLOW START ===');
+  console.log('Reference:', reference);
+  console.log('Timestamp:', new Date().toISOString());
+  
   // First, verify user is authenticated and get a fresh session
   const { data: { user }, error: userError } = await supabase.auth.getUser();
   
@@ -175,6 +179,9 @@ export const verifyPayment = async (
       error: userError?.message || 'No authenticated user',
     };
   }
+  
+  console.log('User authenticated:', user.id);
+  console.log('User email:', user.email);
   
   // Now get the session which should be fresh after getUser() validates it
   const { data: { session } } = await supabase.auth.getSession();
@@ -191,17 +198,22 @@ export const verifyPayment = async (
     };
   }
   
+  console.log('Session valid. Token length:', session.access_token.length);
+  console.log('Session expires at:', new Date(session.expires_at! * 1000).toISOString());
+  
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      console.log(`Verifying payment with reference: ${reference} (attempt ${attempt}/${retries})`);
+      console.log(`Verification attempt ${attempt}/${retries} for reference: ${reference}`);
 
-      // Add a small delay before first retry (not on first attempt)
+      // Add a small delay before retry (not on first attempt)
       if (attempt > 1) {
-        console.log(`Waiting ${delayMs}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
+        const waitTime = delayMs * attempt; // Exponential backoff
+        console.log(`Waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
       }
 
       // Call the verify-payment Edge Function with explicit authorization header
+      console.log('Calling Edge Function...');
       const { data, error } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
         headers: {
@@ -209,20 +221,39 @@ export const verifyPayment = async (
         },
       });
 
-      console.log('Edge Function response:', { data, error });
+      console.log('Edge Function response received:', { 
+        hasData: !!data, 
+        hasError: !!error,
+        dataKeys: data ? Object.keys(data) : [],
+        errorMessage: error?.message 
+      });
 
       if (error) {
         console.error('Payment verification error:', error);
+        console.error('Error details:', JSON.stringify(error, null, 2));
         lastError = error.message;
         
         // Check if it's a 401 authentication error using context if available
         // FunctionsHttpError may have context.status
         const isAuthError = error.message.includes('401') || 
                            error.message.includes('Unauthorized') ||
+                           error.message.includes('Authentication') ||
                            (error as any).context?.status === 401;
         
         if (isAuthError) {
-          console.error('Authentication error - session may be invalid or expired');
+          console.error('Authentication error detected - session may be invalid or expired');
+          // On auth error, try refreshing session and retry once
+          if (attempt === 1) {
+            console.log('Attempting to refresh session...');
+            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+            if (!refreshError && refreshData.session) {
+              console.log('Session refreshed successfully, retrying...');
+              continue; // Retry with refreshed session
+            } else {
+              console.error('Session refresh failed:', refreshError?.message);
+            }
+          }
+          
           return {
             success: false,
             payment_status: 'unauthorized',
@@ -237,9 +268,10 @@ export const verifyPayment = async (
         if (attempt < retries && (
           error.message.includes('timeout') || 
           error.message.includes('network') ||
-          error.message.includes('fetch')
+          error.message.includes('fetch') ||
+          error.message.includes('Failed to fetch')
         )) {
-          console.log('Retrying due to network error...');
+          console.log('Network error detected, will retry...');
           continue;
         }
         
@@ -259,7 +291,7 @@ export const verifyPayment = async (
         lastError = 'No response from verification service';
         
         if (attempt < retries) {
-          console.log('Retrying due to empty response...');
+          console.log('Will retry due to empty response...');
           continue;
         }
         
@@ -273,6 +305,14 @@ export const verifyPayment = async (
         };
       }
 
+      console.log('Verification data received:', {
+        success: data.success,
+        payment_status: data.payment_status,
+        verified: data.verified,
+        amount: data.amount,
+        hasError: !!data.error
+      });
+
       // Check if the response has an error field (API-level error)
       if (data.error) {
         console.error('API returned error:', data.error, data.details);
@@ -285,7 +325,7 @@ export const verifyPayment = async (
           data.details?.includes('not found') ||
           data.details?.includes('pending')
         )) {
-          console.log('Retrying due to payment still processing...');
+          console.log('Payment still processing, will retry...');
           continue;
         }
         
@@ -300,7 +340,8 @@ export const verifyPayment = async (
       }
 
       // Return successful verification
-      console.log('Payment verification successful:', data);
+      console.log('Payment verification successful!');
+      console.log('=== PAYMENT VERIFICATION FLOW END (SUCCESS) ===');
       // Ensure consistent return structure
       return {
         success: data.success !== false,
@@ -311,12 +352,14 @@ export const verifyPayment = async (
         data: data.data,
       };
     } catch (error) {
-      console.error(`Verify payment error (attempt ${attempt}):`, error);
+      console.error(`Verify payment exception (attempt ${attempt}):`, error);
+      console.error('Exception type:', error?.constructor?.name);
+      console.error('Exception message:', error?.message);
       lastError = getErrorMessage(error, 'Failed to verify payment');
       
       // Retry on exception
       if (attempt < retries) {
-        console.log('Retrying due to exception...');
+        console.log('Will retry due to exception...');
         continue;
       }
     }
@@ -324,12 +367,13 @@ export const verifyPayment = async (
   
   // All retries exhausted
   console.error('All verification attempts failed. Last error:', lastError);
+  console.error('=== PAYMENT VERIFICATION FLOW END (FAILED) ===');
   return {
     success: false,
     payment_status: 'unknown',
     verified: false,
     amount: 0,
-    message: `Failed to verify payment after ${retries} attempts`,
+    message: `Failed to verify payment after ${retries} attempts. ${lastError}`,
     error: lastError || 'Verification failed',
   };
 };
