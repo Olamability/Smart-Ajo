@@ -32,7 +32,10 @@ The Edge Function had limited error logging and no session refresh mechanism:
 - Limited error information made debugging difficult
 - No attempt to recover from expired sessions
 
-### 3. Missing Member Count Update
+### 3. Session Refresh Not Using New Token
+The original session refresh implementation didn't use the new token for the retry, making the refresh ineffective.
+
+### 4. Missing Member Count Update
 The `process_group_creation_payment` function didn't increment `current_members`, causing:
 - Incorrect member counts displayed
 - Potential issues with group status transitions
@@ -65,12 +68,14 @@ RETURN EXISTS (
 
 **Improvements**:
 - Added comprehensive logging at each auth step
-- JWT token preview for debugging (first 20 and last 20 chars)
+- JWT token preview only in DEBUG_MODE (optional environment variable)
 - Detailed error categorization
 - Better error messages for users
 - Exception handling around auth verification
 
-**Example log output**:
+**Debug Mode**: Set `DEBUG_MODE=true` in Supabase secrets for detailed logging (not recommended for production)
+
+**Example log output (with DEBUG_MODE=true)**:
 ```
 === AUTH CHECK START ===
 Authorization header present: true
@@ -95,16 +100,19 @@ User email: user@example.com
 **Improvements**:
 - Check user authentication before verification attempts
 - Validate session exists and is not expired
-- Attempt session refresh on auth errors
+- **CRITICAL FIX**: Attempt session refresh on auth errors and use the new token for retry
 - Exponential backoff for retries (2s, 4s, 6s)
 - Comprehensive logging throughout the flow
+- PII logging only in development mode
 
 **Flow**:
 1. Verify user is authenticated with `getUser()`
 2. Get current session
 3. Check session has valid access token
 4. Attempt verification with current token
-5. If 401 error and first attempt, refresh session and retry
+5. If 401 error and first attempt:
+   - Refresh session
+   - **Use the new refreshed token for immediate retry**
 6. If network error, retry with exponential backoff
 7. Provide detailed error messages to user
 
@@ -120,6 +128,13 @@ SET current_members = current_members + 1,
     updated_at = NOW()
 WHERE id = p_group_id;
 ```
+
+## Security Improvements
+
+### PII Protection
+- User IDs and emails only logged in development mode (`import.meta.env.DEV`)
+- JWT token preview only shown when `DEBUG_MODE=true` (Edge Function secret)
+- Production logs contain minimal sensitive information
 
 ## Deployment Instructions
 
@@ -139,6 +154,9 @@ psql $DATABASE_URL < supabase/schema.sql
 ### 2. Deploy Edge Function
 
 ```bash
+# (Optional) Enable debug mode for detailed logging - NOT recommended for production
+# supabase secrets set DEBUG_MODE=true
+
 # Deploy updated verify-payment function
 supabase functions deploy verify-payment
 
@@ -199,6 +217,7 @@ supabase functions logs verify-payment --follow
 - [ ] Before payment completes, wait 5+ minutes (to simulate session expiry)
 - [ ] Complete Paystack payment
 - [ ] Verify frontend attempts session refresh
+- [ ] **CRITICAL**: Verify retry uses the new refreshed token
 - [ ] Verify payment verification eventually succeeds
 - [ ] Check Edge Function logs for session refresh attempt
 
@@ -215,6 +234,7 @@ supabase functions logs verify-payment --follow
 - [ ] Check browser console for detailed logs
 - [ ] Check Edge Function logs: `supabase functions logs verify-payment`
 - [ ] Verify error messages are clear and actionable
+- [ ] Verify no PII is logged in production build
 
 ## Monitoring and Debugging
 
@@ -225,7 +245,7 @@ Look for these log patterns:
 ```
 === PAYMENT VERIFICATION FLOW START ===
 Reference: GRP_CREATE_...
-User authenticated: abc-123-def
+User authenticated successfully
 Session valid. Token length: 245
 Verification attempt 1/3 for reference: GRP_CREATE_...
 Edge Function response received: { hasData: true, hasError: false }
@@ -238,7 +258,7 @@ Payment verification successful!
 supabase functions logs verify-payment --follow
 ```
 
-Look for:
+Look for (with DEBUG_MODE enabled):
 ```
 === AUTH CHECK START ===
 JWT token length: 245
@@ -261,7 +281,7 @@ Authentication failed: invalid JWT
 ```
 
 **Cause**: Session expired  
-**Solution**: Frontend should automatically attempt refresh. If persists, user needs to log out and back in.
+**Solution**: Frontend should automatically attempt refresh with new token. If persists, user needs to log out and back in.
 
 #### Error: "Payment verification failed with Paystack"
 **Logs to check**:
@@ -320,9 +340,11 @@ After this fix, you should see:
 1. ✅ **100% payment verification success rate** (barring actual payment failures)
 2. ✅ **Group creators can manage groups immediately** after creation
 3. ✅ **No more authentication errors** during payment verification
-4. ✅ **Clear error messages** when issues occur
-5. ✅ **Accurate member counts** in all groups
-6. ✅ **Better debugging capability** with comprehensive logs
+4. ✅ **Session refresh works with new token** for seamless recovery
+5. ✅ **Clear error messages** when issues occur
+6. ✅ **Accurate member counts** in all groups
+7. ✅ **Better debugging capability** with comprehensive logs
+8. ✅ **PII protected** in production environments
 
 ## Support and Monitoring
 
@@ -355,6 +377,6 @@ Set up alerts for:
 
 This fix addresses the core architectural issue where group creators lost admin rights if payment verification failed. By checking both the `groups.created_by` field and the `group_members.is_creator` flag, creators maintain control of their groups throughout the payment process.
 
-The enhanced logging and session management provide much better visibility into payment verification issues and automatic recovery from common failure scenarios.
+The enhanced logging and session management provide much better visibility into payment verification issues and automatic recovery from common failure scenarios. **The critical fix to use the refreshed token in retries ensures that session expiry no longer blocks payment completion.**
 
-The application should now have a robust, user-friendly payment flow that handles edge cases gracefully while maintaining security and data integrity.
+The application should now have a robust, user-friendly payment flow that handles edge cases gracefully while maintaining security and data integrity with protected PII logging.
