@@ -156,18 +156,35 @@ export const verifyPayment = async (
   let lastError: string = '';
   
   // Get the current session once before attempting retries
-  // Session is unlikely to change during retry attempts
+  // Use getUser() instead of getSession() to ensure token is valid and refresh if needed
   const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
   
-  if (!session?.access_token) {
-    console.error('No active session found');
+  // First, verify user is authenticated and get a fresh session
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  
+  if (userError || !user) {
+    console.error('User authentication failed:', userError?.message || 'No user found');
     return {
       success: false,
       payment_status: 'unauthorized',
       verified: false,
       amount: 0,
       message: 'Authentication required. Please log in again.',
+      error: userError?.message || 'No authenticated user',
+    };
+  }
+  
+  // Now get the session which should be fresh after getUser() validates it
+  const { data: { session } } = await supabase.auth.getSession();
+  
+  if (!session?.access_token) {
+    console.error('No active session found after user verification');
+    return {
+      success: false,
+      payment_status: 'unauthorized',
+      verified: false,
+      amount: 0,
+      message: 'Session expired. Please log in again.',
       error: 'No active session',
     };
   }
