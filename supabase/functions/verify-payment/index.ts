@@ -439,7 +439,12 @@ serve(async (req) => {
     // Extract JWT token from Authorization header
     const jwt = authHeader.replace('Bearer ', '');
     console.log('JWT token length:', jwt.length);
-    console.log('JWT token preview:', jwt.substring(0, 20) + '...' + jwt.substring(jwt.length - 20));
+    
+    // Only log token preview in development/debug mode (not in production)
+    const isDebugMode = Deno.env.get('DEBUG_MODE') === 'true';
+    if (isDebugMode) {
+      console.log('JWT token preview:', jwt.substring(0, 20) + '...' + jwt.substring(jwt.length - 20));
+    }
     
     // Verify the JWT token is valid with more detailed error handling
     let user;
@@ -482,7 +487,10 @@ serve(async (req) => {
     }
 
     console.log(`Request from authenticated user: ${user.id}`);
-    console.log('User email:', user.email);
+    // Only log email in debug mode
+    if (isDebugMode) {
+      console.log('User email:', user.email);
+    }
     console.log('=== AUTH CHECK PASSED ===');
 
     // Get Paystack secret key

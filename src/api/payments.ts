@@ -180,8 +180,13 @@ export const verifyPayment = async (
     };
   }
   
-  console.log('User authenticated:', user.id);
-  console.log('User email:', user.email);
+  // Don't log PII in production
+  if (import.meta.env.DEV) {
+    console.log('User authenticated:', user.id);
+    console.log('User email:', user.email);
+  } else {
+    console.log('User authenticated successfully');
+  }
   
   // Now get the session which should be fresh after getUser() validates it
   const { data: { session } } = await supabase.auth.getSession();
@@ -199,7 +204,9 @@ export const verifyPayment = async (
   }
   
   console.log('Session valid. Token length:', session.access_token.length);
-  console.log('Session expires at:', new Date(session.expires_at! * 1000).toISOString());
+  if (import.meta.env.DEV) {
+    console.log('Session expires at:', new Date(session.expires_at! * 1000).toISOString());
+  }
   
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -247,8 +254,33 @@ export const verifyPayment = async (
             console.log('Attempting to refresh session...');
             const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
             if (!refreshError && refreshData.session) {
-              console.log('Session refreshed successfully, retrying...');
-              continue; // Retry with refreshed session
+              console.log('Session refreshed successfully, retrying with new token...');
+              // Update session with refreshed token for retry
+              const refreshedSession = refreshData.session;
+              
+              // Retry immediately with refreshed session
+              try {
+                const { data: retryData, error: retryError } = await supabase.functions.invoke('verify-payment', {
+                  body: { reference },
+                  headers: {
+                    Authorization: `Bearer ${refreshedSession.access_token}`,
+                  },
+                });
+                
+                if (!retryError && retryData && !retryData.error) {
+                  console.log('Verification successful after session refresh!');
+                  return {
+                    success: retryData.success !== false,
+                    payment_status: retryData.payment_status || 'success',
+                    verified: retryData.verified === true,
+                    amount: retryData.amount || 0,
+                    message: retryData.message || 'Payment verified successfully',
+                    data: retryData.data,
+                  };
+                }
+              } catch (retryErr) {
+                console.error('Retry after refresh failed:', retryErr);
+              }
             } else {
               console.error('Session refresh failed:', refreshError?.message);
             }
