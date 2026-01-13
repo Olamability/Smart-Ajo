@@ -397,7 +397,9 @@ serve(async (req) => {
   try {
     // Verify authentication - extract JWT token
     const authHeader = req.headers.get('Authorization');
+    console.log('=== AUTH CHECK START ===');
     console.log('Authorization header present:', !!authHeader);
+    console.log('Timestamp:', new Date().toISOString());
     
     if (!authHeader) {
       console.error('Missing authorization header');
@@ -438,19 +440,44 @@ serve(async (req) => {
     const jwt = authHeader.replace('Bearer ', '');
     console.log('JWT token length:', jwt.length);
     
-    // Verify the JWT token is valid
-    const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
+    // Only log token preview in development/debug mode (not in production)
+    const isDebugMode = Deno.env.get('DEBUG_MODE') === 'true';
+    if (isDebugMode) {
+      console.log('JWT token preview:', jwt.substring(0, 20) + '...' + jwt.substring(jwt.length - 20));
+    }
+    
+    // Verify the JWT token is valid with more detailed error handling
+    let user;
+    let authError;
+    
+    try {
+      const result = await supabase.auth.getUser(jwt);
+      user = result.data?.user;
+      authError = result.error;
+      
+      console.log('Auth verification result:', {
+        hasUser: !!user,
+        hasError: !!authError,
+        errorMessage: authError?.message,
+        userId: user?.id
+      });
+    } catch (err) {
+      console.error('Exception during auth verification:', err);
+      authError = { message: 'Auth verification exception', details: err };
+    }
     
     if (authError || !user) {
       // Log detailed error server-side only
       console.error('Authentication failed:', authError?.message || 'No user found');
-      console.error('Auth error details:', JSON.stringify(authError));
+      console.error('Auth error details:', JSON.stringify(authError, null, 2));
+      console.error('=== AUTH CHECK FAILED ===');
       
       // Return generic error to client (don't expose auth details)
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
           message: 'Invalid or expired authentication token. Please log in again.',
+          details: 'Authentication verification failed. Your session may have expired.'
         }),
         {
           status: 401,
@@ -460,6 +487,11 @@ serve(async (req) => {
     }
 
     console.log(`Request from authenticated user: ${user.id}`);
+    // Only log email in debug mode
+    if (isDebugMode) {
+      console.log('User email:', user.email);
+    }
+    console.log('=== AUTH CHECK PASSED ===');
 
     // Get Paystack secret key
     const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY');

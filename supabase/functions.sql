@@ -1179,6 +1179,12 @@ BEGIN
     NOW()
   );
 
+  -- Update group's current_members count
+  UPDATE groups
+  SET current_members = current_members + 1,
+      updated_at = NOW()
+  WHERE id = p_group_id;
+
   RETURN QUERY SELECT TRUE, 'Group creation payment processed successfully'::TEXT;
 
 EXCEPTION

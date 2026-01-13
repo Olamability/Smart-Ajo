@@ -685,18 +685,27 @@ BEGIN
     RAISE EXCEPTION 'p_group_id cannot be NULL';
   END IF;
   
+  -- Check two conditions:
+  -- 1. User is marked as creator in group_members (after payment)
+  -- 2. User is the created_by in groups table (before payment)
+  -- This allows creators to manage their groups even before completing payment
   RETURN EXISTS (
     SELECT 1 FROM group_members
     WHERE user_id = p_user_id
       AND group_id = p_group_id
       AND is_creator = true
+  ) OR EXISTS (
+    SELECT 1 FROM groups
+    WHERE id = p_group_id
+      AND created_by = p_user_id
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
 COMMENT ON FUNCTION is_group_creator IS 
-  'Checks if a user is the creator of a group (has is_creator = true). 
-   Uses SECURITY DEFINER to bypass RLS and avoid infinite recursion in policies.';
+  'Checks if a user is the creator of a group by checking both group_members.is_creator 
+   and groups.created_by. This allows creators to manage their groups even before 
+   completing payment. Uses SECURITY DEFINER to bypass RLS and avoid infinite recursion.';
 
 -- ============================================================================
 -- FUNCTION: Get group progress
