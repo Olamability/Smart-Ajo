@@ -71,7 +71,7 @@ supabase functions list
 # ┌──────────────────┬────────┬─────────────────────┐
 # │ NAME             │ STATUS │ CREATED AT          │
 # ├──────────────────┼────────┼─────────────────────┤
-# │ verify-payment   │ ACTIVE │ 2026-01-XX XX:XX:XX │
+# │ verify-payment   │ ACTIVE │ YYYY-MM-DD HH:MM:SS │
 # └──────────────────┴────────┴─────────────────────┘
 ```
 
@@ -371,7 +371,7 @@ Most likely:
 
 ---
 
-**Last Updated:** 2026-01-13  
+**Last Updated:** January 13, 2024  
 **Related Docs:**
 - [PAYMENT_VERIFICATION_401_FIX.md](./PAYMENT_VERIFICATION_401_FIX.md) - Detailed fix documentation
 - [EDGE_FUNCTIONS_SETUP.md](./EDGE_FUNCTIONS_SETUP.md) - Edge Functions configuration
