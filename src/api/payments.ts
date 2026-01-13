@@ -215,8 +215,13 @@ export const verifyPayment = async (
         console.error('Payment verification error:', error);
         lastError = error.message;
         
-        // Check if it's a 401 authentication error
-        if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+        // Check if it's a 401 authentication error using context if available
+        // FunctionsHttpError may have context.status
+        const isAuthError = error.message.includes('401') || 
+                           error.message.includes('Unauthorized') ||
+                           (error as any).context?.status === 401;
+        
+        if (isAuthError) {
           console.error('Authentication error - session may be invalid or expired');
           return {
             success: false,
