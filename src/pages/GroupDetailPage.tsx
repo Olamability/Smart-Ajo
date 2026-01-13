@@ -365,10 +365,13 @@ export default function GroupDetailPage() {
   };
 
   const handleCreatorPayment = async () => {
-    if (!group || !user || !id || !creatorSelectedSlot) {
-      if (!creatorSelectedSlot) {
-        toast.error('Please select a payout slot');
-      }
+    if (!group || !user || !id) {
+      toast.error('Unable to process payment. Please try again.');
+      return;
+    }
+    
+    if (!creatorSelectedSlot) {
+      toast.error('Please select a payout slot');
       return;
     }
 
