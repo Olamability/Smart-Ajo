@@ -397,6 +397,8 @@ serve(async (req) => {
   try {
     // Verify authentication - extract JWT token
     const authHeader = req.headers.get('Authorization');
+    console.log('Authorization header present:', !!authHeader);
+    
     if (!authHeader) {
       console.error('Missing authorization header');
       return new Response(
@@ -415,6 +417,9 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     
+    console.log('Supabase URL configured:', !!supabaseUrl);
+    console.log('Service key configured:', !!supabaseServiceKey);
+    
     if (!supabaseUrl || !supabaseServiceKey) {
       console.error('Supabase configuration missing');
       return new Response(
@@ -431,16 +436,19 @@ serve(async (req) => {
 
     // Extract JWT token from Authorization header
     const jwt = authHeader.replace('Bearer ', '');
+    console.log('JWT token length:', jwt.length);
     
     // Verify the JWT token is valid
     const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
     
     if (authError || !user) {
       console.error('Authentication failed:', authError?.message || 'No user found');
+      console.error('Auth error details:', JSON.stringify(authError));
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
           message: 'Invalid or expired authentication token. Please log in again.',
+          details: authError?.message,
         }),
         {
           status: 401,
