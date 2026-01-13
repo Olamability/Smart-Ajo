@@ -12,8 +12,10 @@ import {
   getUserJoinRequestStatus,
 } from '@/api';
 import {
+  initializeGroupCreationPayment,
   initializeGroupJoinPayment,
   verifyPayment,
+  processGroupCreationPayment,
   processApprovedJoinPayment,
   pollPaymentStatus,
 } from '@/api/payments';
@@ -97,6 +99,10 @@ export default function GroupDetailPage() {
   // State for approved join request payment
   const [userJoinRequest, setUserJoinRequest] = useState<any>(null);
   const [showApprovedPaymentDialog, setShowApprovedPaymentDialog] = useState(false);
+  
+  // State for creator join and payment
+  const [showCreatorJoinDialog, setShowCreatorJoinDialog] = useState(false);
+  const [creatorSelectedSlot, setCreatorSelectedSlot] = useState<number | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -358,6 +364,153 @@ export default function GroupDetailPage() {
     }
   };
 
+  const handleCreatorPayment = async () => {
+    if (!group || !user || !id || !creatorSelectedSlot) {
+      if (!creatorSelectedSlot) {
+        toast.error('Please select a payout slot');
+      }
+      return;
+    }
+
+    setIsProcessingPayment(true);
+    try {
+      // Calculate total amount (security deposit + first contribution)
+      const totalAmount = group.securityDepositAmount + group.contributionAmount;
+
+      // Initialize payment record for group creation
+      const initResult = await initializeGroupCreationPayment(id, totalAmount);
+      
+      if (!initResult.success || !initResult.reference) {
+        toast.error(initResult.error || 'Failed to initialize payment');
+        setIsProcessingPayment(false);
+        return;
+      }
+
+      // Open Paystack payment popup
+      await paystackService.initializePayment({
+        email: user.email!,
+        amount: totalAmount * 100, // Convert to kobo
+        reference: initResult.reference,
+        metadata: {
+          type: 'group_creation',
+          group_id: id,
+          user_id: user.id,
+          preferred_slot: creatorSelectedSlot,
+        },
+        callback_url: `${import.meta.env.VITE_APP_URL}/payment/success?reference=${initResult.reference}&group=${id}`,
+        callback: async (response: PaystackResponse) => {
+          try {
+            // Payment successful, verify on backend
+            if (response.status === 'success') {
+              toast.info('Payment received! Verifying with backend...', {
+                duration: 5000,
+              });
+              
+              // Verify payment with backend (with retry logic)
+              const verifyResult = await verifyPayment(response.reference);
+              
+              console.log('Verification result:', verifyResult);
+              
+              if (verifyResult.verified) {
+                toast.success('Payment verified! Processing your membership...');
+                
+                // Process payment and add creator as member with selected slot
+                const processResult = await processGroupCreationPayment(
+                  response.reference,
+                  id,
+                  creatorSelectedSlot
+                );
+                
+                if (processResult.success) {
+                  toast.success('Payment verified! You are now the group admin.');
+                  setShowCreatorJoinDialog(false);
+                  // Reload data
+                  await loadGroupDetails();
+                  await loadMembers();
+                } else {
+                  console.error('Payment processing failed:', processResult.error);
+                  toast.error(
+                    processResult.error || 
+                    'Failed to process payment. Please contact support with reference: ' + response.reference,
+                    { duration: 10000 }
+                  );
+                }
+              } else {
+                console.error('Payment verification failed:', verifyResult);
+                
+                // Try fallback: poll payment status from database
+                toast.info('Verification failed. Checking payment status...', {
+                  duration: 5000,
+                });
+                
+                const pollResult = await pollPaymentStatus(response.reference);
+                
+                if (pollResult.verified) {
+                  console.log('Payment verified via polling fallback');
+                  toast.success('Payment verified! Processing your membership...');
+                  
+                  // Process payment
+                  const processResult = await processGroupCreationPayment(
+                    response.reference,
+                    id,
+                    creatorSelectedSlot
+                  );
+                  
+                  if (processResult.success) {
+                    toast.success('Payment verified! You are now the group admin.');
+                    setShowCreatorJoinDialog(false);
+                    // Reload data
+                    await loadGroupDetails();
+                    await loadMembers();
+                  } else {
+                    console.error('Payment processing failed:', processResult.error);
+                    toast.error(
+                      processResult.error || 
+                      'Failed to process payment. Please contact support with reference: ' + response.reference,
+                      { duration: 10000 }
+                    );
+                  }
+                } else {
+                  // Both verification and polling failed
+                  let errorMessage = 'Payment verification failed.';
+                  if (verifyResult.payment_status === 'verification_failed') {
+                    errorMessage = 'Unable to verify payment with Paystack. Please contact support with reference: ' + response.reference;
+                  } else if (verifyResult.payment_status === 'failed') {
+                    errorMessage = 'Payment was declined by your bank. Please try again.';
+                  } else if (verifyResult.error) {
+                    errorMessage = `Verification error: ${verifyResult.error}. Reference: ${response.reference}`;
+                  } else {
+                    errorMessage = `Payment status: ${verifyResult.payment_status}. Please contact support with reference: ${response.reference}`;
+                  }
+                  
+                  toast.error(errorMessage, { duration: 10000 });
+                }
+              }
+            } else {
+              toast.error('Payment was not successful');
+            }
+          } catch (error) {
+            console.error('Error in payment callback:', error);
+            toast.error(
+              'An error occurred while processing your payment. Please contact support with reference: ' + response.reference,
+              { duration: 10000 }
+            );
+          } finally {
+            setIsProcessingPayment(false);
+          }
+        },
+        onClose: () => {
+          toast.info('Payment cancelled');
+          setIsProcessingPayment(false);
+        },
+      });
+    } catch (error) {
+      console.error('Payment error:', error);
+      toast.error('Failed to initialize payment');
+      setIsProcessingPayment(false);
+    }
+  };
+
   const handlePaySecurityDeposit = async () => {
     if (!group || !user || !id) return;
 
@@ -573,7 +726,7 @@ export default function GroupDetailPage() {
         {isCreator && !currentUserMember && group?.status === 'forming' && (
           <Alert className="bg-orange-50 border-orange-200">
             <AlertCircle className="h-4 w-4 text-orange-600" />
-            <AlertDescription>
+            <AlertDescription className="flex items-center justify-between">
               <div>
                 <span className="text-orange-900 font-semibold">
                   Complete Your Payment to Become Group Admin
@@ -583,6 +736,15 @@ export default function GroupDetailPage() {
                   Please complete your payment (security deposit + first contribution) to become the group admin and activate your membership.
                 </p>
               </div>
+              <Button
+                onClick={() => setShowCreatorJoinDialog(true)}
+                disabled={isProcessingPayment}
+                size="sm"
+                className="ml-4"
+              >
+                <CreditCard className="w-4 h-4 mr-2" />
+                Join & Pay
+              </Button>
             </AlertDescription>
           </Alert>
         )}
@@ -726,6 +888,110 @@ export default function GroupDetailPage() {
               <Button
                 onClick={handleApprovedMemberPayment}
                 disabled={isProcessingPayment}
+              >
+                {isProcessingPayment ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="w-4 h-4 mr-2" />
+                    Pay {group && formatCurrency(
+                      group.securityDepositAmount + group.contributionAmount
+                    )}
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Creator Join & Pay Dialog */}
+        <Dialog open={showCreatorJoinDialog} onOpenChange={(open) => {
+          if (!open && !isProcessingPayment) {
+            setShowCreatorJoinDialog(false);
+          }
+        }}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto w-[95vw] sm:w-full">
+            <DialogHeader>
+              <DialogTitle>Join Your Group as Admin</DialogTitle>
+              <DialogDescription>
+                Select your preferred payout position and pay the security deposit 
+                + first contribution to become the group admin.
+              </DialogDescription>
+            </DialogHeader>
+
+            {group && (
+              <div className="space-y-6">
+                {/* Payment Summary */}
+                <Card className="bg-primary/5">
+                  <CardHeader>
+                    <CardTitle className="text-lg">Payment Summary</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Security Deposit:</span>
+                      <span className="font-semibold">
+                        {formatCurrency(group.securityDepositAmount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">First Contribution:</span>
+                      <span className="font-semibold">
+                        {formatCurrency(group.contributionAmount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-lg border-t pt-2 mt-2">
+                      <span className="font-semibold">Total Amount:</span>
+                      <span className="font-bold text-green-600">
+                        {formatCurrency(
+                          group.securityDepositAmount + group.contributionAmount
+                        )}
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Slot Selection */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-4">Select Your Payout Position</h3>
+                  {id && (
+                    <SlotSelector
+                      groupId={id}
+                      selectedSlot={creatorSelectedSlot}
+                      onSlotSelect={setCreatorSelectedSlot}
+                      disabled={isProcessingPayment}
+                    />
+                  )}
+                </div>
+
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    <strong>Important:</strong> Your selected position determines when you'll 
+                    receive your payout during the rotation cycle. Position 1 receives payout 
+                    in the first cycle, position 2 in the second cycle, and so on.
+                  </AlertDescription>
+                </Alert>
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (!isProcessingPayment) {
+                    setShowCreatorJoinDialog(false);
+                  }
+                }}
+                disabled={isProcessingPayment}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreatorPayment}
+                disabled={isProcessingPayment || !creatorSelectedSlot}
               >
                 {isProcessingPayment ? (
                   <>
