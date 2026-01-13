@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CheckCircle2, CreditCard, Loader2, AlertCircle } from 'lucide-react';
@@ -20,14 +20,7 @@ export default function PaymentSuccessPage() {
   const reference = searchParams.get('reference') || searchParams.get('trxref');
   const groupId = searchParams.get('group');
 
-  useEffect(() => {
-    // Auto-verify payment if reference is provided
-    if (reference && verificationStatus === 'idle') {
-      handleVerifyPayment();
-    }
-  }, [reference, verificationStatus]);
-
-  const handleVerifyPayment = async () => {
+  const handleVerifyPayment = useCallback(async () => {
     if (!reference) {
       setVerificationStatus('failed');
       setVerificationMessage('No payment reference provided');
@@ -55,7 +48,14 @@ export default function PaymentSuccessPage() {
       setVerificationMessage('Failed to verify payment. Please contact support.');
       toast.error('Failed to verify payment');
     }
-  };
+  }, [reference]);
+
+  useEffect(() => {
+    // Auto-verify payment if reference is provided
+    if (reference && verificationStatus === 'idle') {
+      handleVerifyPayment();
+    }
+  }, [reference, verificationStatus, handleVerifyPayment]);
 
   const handleNavigation = () => {
     // Navigate to group page if group ID is provided, otherwise to dashboard
